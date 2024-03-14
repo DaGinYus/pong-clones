@@ -12,4 +12,18 @@ config_version=5
 
 config/name="Pong"
 config/features=PackedStringArray("4.2", "Forward Plus")
+run/max_fps=60
 config/icon="res://icon.svg"
+
+[debug]
+
+settings/stdout/verbose_stdout=true
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=480
+
+[filesystem]
+
+import/blender/enabled=false
