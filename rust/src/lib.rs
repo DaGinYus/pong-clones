@@ -16,6 +16,7 @@
 use godot::prelude::*;
 use godot::engine::{Polygon2D, Area2D, IArea2D, Viewport, InputEvent, InputEventKey};
 
+// these are hardcoded, maybe consider making these dynamic based on viewport settings
 const VIEWPORT_WIDTH: i32 = 640;
 const VIEWPORT_HEIGHT: i32 = 480;
 const PX_UNIT_WIDTH: f32 = 1.68;
@@ -24,7 +25,6 @@ const HBLANK: i32 = 81;
 const VBLANK: i32 = 16;
 const HSYNC_DLY: i32 = 16;
 const VSYNC_DLY: i32 = 8;
-
 
 struct Pong;
 
@@ -77,11 +77,6 @@ impl INode for Main {
         self.net.bind_mut().draw();
         self.base_mut().add_child(paddle_l_clone.upcast());
         self.base_mut().add_child(paddle_r_clone.upcast());
-    }
-
-    fn process(&mut self, _delta: f64) {
-        self.paddle_l.bind_mut().draw();
-        self.paddle_r.bind_mut().draw();
     }
 }
 
@@ -151,10 +146,19 @@ impl IArea2D for Paddle {
         self.base_mut().add_child(polygon_clone.upcast());
     }
 
-    fn input_event(&mut self, _viewport: Gd<Viewport>, event: Gd<InputEvent>, _shape_idx: i32) {
-        if let Ok(_) =  event.try_cast::<InputEventKey>() {
-            godot_print!("foo");
+    fn process(&mut self, _delta: f64) {
+        let input = Input::singleton();
+        match self.side {
+            PaddleSide::Left => {
+                if input.is_action_pressed("up_l".into()) { self.ypos += 1 }
+                if input.is_action_pressed("dn_l".into()) { self.ypos -= 1 }
+            },
+            PaddleSide::Right => {
+                if input.is_action_pressed("up_r".into()) { self.ypos += 1 }
+                if input.is_action_pressed("dn_r".into()) { self.ypos -= 1 }
+            }
         }
+        self.draw();
     }
 }
 

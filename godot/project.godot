@@ -27,3 +27,22 @@ window/size/viewport_height=480
 [filesystem]
 
 import/blender/enabled=false
+
+[input]
+
+up_r={
+"deadzone": 0.5,
+"events": []
+}
+dn_r={
+"deadzone": 0.5,
+"events": []
+}
+up_l={
+"deadzone": 0.5,
+"events": []
+}
+dn_l={
+"deadzone": 0.5,
+"events": []
+}
