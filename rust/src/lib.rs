@@ -14,38 +14,74 @@
 //      480px / 62.48ms = 1.89 px/ms = 1.95 px/1V
 
 use godot::prelude::*;
-use godot::engine::{Polygon2D, IPolygon2D};
+use godot::engine::{Polygon2D, Area2D, IArea2D, Viewport, InputEvent, InputEventKey};
 
-const VIEWPORT_W: i32 = 640;
-const VIEWPORT_H: i32 = 480;
-const PX_UNIT_W: f32 = 1.68;
-const PX_UNIT_H: f32 = 1.95;
+const VIEWPORT_WIDTH: i32 = 640;
+const VIEWPORT_HEIGHT: i32 = 480;
+const PX_UNIT_WIDTH: f32 = 1.68;
+const PX_UNIT_HEIGHT: f32 = 1.95;
+const HBLANK: i32 = 81;
+const VBLANK: i32 = 16;
+const HSYNC_DLY: i32 = 16;
+const VSYNC_DLY: i32 = 8;
+
 
 struct Pong;
 
 #[gdextension]
 unsafe impl ExtensionLibrary for Pong {}
 
-fn hclk_to_x(px: i32) -> i32{
-    (px as f32 * PX_UNIT_W) as i32
+fn hclk_to_xpos(hclk: i32) -> i32 {
+    let hclk_since_hsync = hclk - HBLANK + HSYNC_DLY;
+    (hclk_since_hsync as f32 * PX_UNIT_WIDTH) as i32
 }
 
-fn vclk_to_y(px: i32) -> i32{
-    (px as f32 * PX_UNIT_H) as i32
+fn hclk_to_interval(hclk: i32) -> i32 {
+    (hclk as f32 * PX_UNIT_WIDTH) as i32
+}
+
+fn vclk_to_ypos(vclk: i32) -> i32 {
+    let vclk_since_vsync = vclk - VBLANK + VSYNC_DLY;
+    (vclk_since_vsync as f32 * PX_UNIT_HEIGHT) as i32
+}
+
+fn vclk_to_interval(vclk: i32) -> i32 {
+    (vclk as f32 * PX_UNIT_HEIGHT) as i32
 }
 
 #[derive(GodotClass)]
-#[class(init, base=Node)]
+#[class(base=Node)]
 struct Main {
+    net: Gd<Net>,
+    paddle_l: Gd<Paddle>,
+    paddle_r: Gd<Paddle>,
     base: Base<Node>
 }
 
 #[godot_api]
 impl INode for Main {
+    fn init(base: Base<Node>) -> Self {
+        Self {
+            net: Net::new_alloc(),
+            paddle_l: Paddle::from_side(PaddleSide::Left),
+            paddle_r: Paddle::from_side(PaddleSide::Right),
+            base
+        } 
+    }
+
     fn ready(&mut self) {
-        let mut net = Net::new_alloc();
-        self.base_mut().add_child(net.clone().upcast());
-        net.bind_mut().draw();
+        let net_clone = self.net.clone();
+        let paddle_l_clone = self.paddle_l.clone();
+        let paddle_r_clone = self.paddle_r.clone();
+        self.base_mut().add_child(net_clone.clone().upcast());
+        self.net.bind_mut().draw();
+        self.base_mut().add_child(paddle_l_clone.upcast());
+        self.base_mut().add_child(paddle_r_clone.upcast());
+    }
+
+    fn process(&mut self, _delta: f64) {
+        self.paddle_l.bind_mut().draw();
+        self.paddle_r.bind_mut().draw();
     }
 }
 
@@ -56,24 +92,23 @@ struct Net {
 }
 
 impl Net {
-    // the net is triggered at 256H from the HRST signal, or 175H from the beginning of draw time
+    // the net is triggered at 256H from the HRST signal
     // the net is dependent on a 4V signal for the segments, and is only one pulse wide
     // this means the net should be drawn with roughly 2x8 segments 8px apart
     fn draw(&mut self) {
-        let net_start = hclk_to_x(175);
+        let net_left_edge = hclk_to_xpos(256) as f32;
         let mut polygons = PackedVector2Array::new();
         let mut polygon_indices = Array::<Variant>::new();
-        let net_segment_spacing: usize = hclk_to_x(8).try_into().unwrap();
+        let net_segment_spacing: usize = vclk_to_interval(8).try_into().unwrap();
 
-        let net_to_f = net_start as f32;
-        let net_width_to_f = PX_UNIT_W as f32;
-        let net_height_to_f = 4.0*PX_UNIT_H as f32;
-        for i in (0..VIEWPORT_H).step_by(net_segment_spacing) {
+        let net_width = hclk_to_interval(1) as f32;
+        let net_height = vclk_to_interval(4) as f32;
+        for i in (0..VIEWPORT_HEIGHT).step_by(net_segment_spacing) {
             let to_float_i = i as f32;
-            polygons.push(Vector2::new(net_to_f, to_float_i));
-            polygons.push(Vector2::new(net_to_f+net_width_to_f, to_float_i));
-            polygons.push(Vector2::new(net_to_f+net_width_to_f, to_float_i+net_height_to_f));
-            polygons.push(Vector2::new(net_to_f, to_float_i+net_height_to_f));
+            polygons.push(Vector2::new(net_left_edge, to_float_i));
+            polygons.push(Vector2::new(net_left_edge+net_width, to_float_i));
+            polygons.push(Vector2::new(net_left_edge+net_width, to_float_i+net_height));
+            polygons.push(Vector2::new(net_left_edge, to_float_i+net_height));
         }
         let num_vertices = polygons.len();
         for i in 0..num_vertices/4 {
@@ -87,39 +122,72 @@ impl Net {
 
 enum PaddleSide {
     Left,
-    Right,
+    Right
 }
 
 #[derive(GodotClass)]
-#[class(base=Polygon2D)]
+#[class(base=Area2D)]
 struct Paddle {
-    xpos: i32,
     ypos: i32,
     side: PaddleSide,
-    base: Base<Polygon2D>
+    polygon: Gd<Polygon2D>,
+    base: Base<Area2D>
 }
 
 #[godot_api]
-impl IPolygon2D for Paddle {
-    fn init(base: Base<Polygon2D>) -> Self {
+impl IArea2D for Paddle {
+    fn init(base: Base<Area2D>) -> Self {
+        let init_y = vclk_to_ypos(128);
         Self {
-            xpos: 0,
-            ypos: 0,
+            ypos: init_y,
             side: PaddleSide::Left,
-            base,
+            polygon: Polygon2D::new_alloc(),
+            base
+        }
+    }
+
+    fn ready(&mut self) {
+        let polygon_clone = self.polygon.clone();
+        self.base_mut().add_child(polygon_clone.upcast());
+    }
+
+    fn input_event(&mut self, _viewport: Gd<Viewport>, event: Gd<InputEvent>, _shape_idx: i32) {
+        if let Ok(_) =  event.try_cast::<InputEventKey>() {
+            godot_print!("foo");
         }
     }
 }
 
 impl Paddle {
-    // the paddle was triggered at 128H and was 4H wide
-    // it was composed of 15 'segments,' each one taking up one line
+    fn from_side(side: PaddleSide) -> Gd<Self> {
+        let init_y = vclk_to_ypos(128);
+        Gd::from_init_fn(|base| {
+            Self {
+                ypos: init_y,
+                side,
+                polygon: Polygon2D::new_alloc(),
+                base
+            }
+        })
+    }
+
+    // the paddle was triggered at when the 128H clock signal went high and was 4H wide
+    // it was composed of 15 'segments,' each composed of one HSYNC, or one line
     // the ball's vertical velocity is determined by which segment it hits
+    // the new vertices are always pushed, this might be slow--consider only updating when y changes
     fn draw(&mut self) {
-        let polygon = PackedVector2Array::new();
-        match self.side {
-            PaddleSide::Left => (),
-            PaddleSide::Right => (),
-        }
+        let mut vertices = PackedVector2Array::new();
+        let xpos = match self.side {
+            PaddleSide::Left => hclk_to_xpos(128),
+            PaddleSide::Right => hclk_to_xpos(128+256),
+        } as f32;
+        let ypos = self.ypos as f32;
+        let bat_height = vclk_to_interval(15) as f32;
+        let bat_width = hclk_to_interval(4) as f32;
+        vertices.push(Vector2::new(xpos, ypos));
+        vertices.push(Vector2::new(xpos+bat_width, ypos));
+        vertices.push(Vector2::new(xpos+bat_width, ypos+bat_height));
+        vertices.push(Vector2::new(xpos, ypos+bat_height));
+        self.polygon.set_polygon(vertices);
     }
 }
