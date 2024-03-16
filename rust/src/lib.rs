@@ -14,26 +14,28 @@
 //      480px / 62.48ms = 1.89 px/ms = 1.95 px/1V
 
 use godot::prelude::*;
-use godot::engine::{Polygon2D, Area2D, IArea2D, Viewport, InputEvent, InputEventKey};
+use godot::engine::{Polygon2D, Area2D, IArea2D};
 
 // these are hardcoded, maybe consider making these dynamic based on viewport settings
-const VIEWPORT_WIDTH: i32 = 640;
+// a singleton containing game constants could be helpful here
 const VIEWPORT_HEIGHT: i32 = 480;
 const PX_UNIT_WIDTH: f32 = 1.68;
 const PX_UNIT_HEIGHT: f32 = 1.95;
 const HBLANK: i32 = 81;
 const VBLANK: i32 = 16;
-const HSYNC_DLY: i32 = 16;
-const VSYNC_DLY: i32 = 8;
+const HSHIFT: i32 = 16;
+const PADDLE_MOVE_BY: i32 = 16;
 
 struct Pong;
 
 #[gdextension]
 unsafe impl ExtensionLibrary for Pong {}
 
+// the original circuitry resulted in the net being shifted to the left instead
+// we can add HSHIFT to center everything, or we can turn it off for 'accuracy'
 fn hclk_to_xpos(hclk: i32) -> i32 {
-    let hclk_since_hsync = hclk - HBLANK + HSYNC_DLY;
-    (hclk_since_hsync as f32 * PX_UNIT_WIDTH) as i32
+    let hclk_since_hblank = hclk - HBLANK + HSHIFT;
+    (hclk_since_hblank as f32 * PX_UNIT_WIDTH) as i32
 }
 
 fn hclk_to_interval(hclk: i32) -> i32 {
@@ -41,8 +43,8 @@ fn hclk_to_interval(hclk: i32) -> i32 {
 }
 
 fn vclk_to_ypos(vclk: i32) -> i32 {
-    let vclk_since_vsync = vclk - VBLANK + VSYNC_DLY;
-    (vclk_since_vsync as f32 * PX_UNIT_HEIGHT) as i32
+    let vclk_since_vblank = vclk - VBLANK;
+    (vclk_since_vblank as f32 * PX_UNIT_HEIGHT) as i32
 }
 
 fn vclk_to_interval(vclk: i32) -> i32 {
@@ -150,12 +152,12 @@ impl IArea2D for Paddle {
         let input = Input::singleton();
         match self.side {
             PaddleSide::Left => {
-                if input.is_action_pressed("up_l".into()) { self.ypos += 1 }
-                if input.is_action_pressed("dn_l".into()) { self.ypos -= 1 }
+                if input.is_action_pressed("up_l".into()) { self.move_up() }
+                if input.is_action_pressed("dn_l".into()) { self.move_down()}
             },
             PaddleSide::Right => {
-                if input.is_action_pressed("up_r".into()) { self.ypos += 1 }
-                if input.is_action_pressed("dn_r".into()) { self.ypos -= 1 }
+                if input.is_action_pressed("up_r".into()) { self.move_up() }
+                if input.is_action_pressed("dn_r".into()) { self.move_down() }
             }
         }
         self.draw();
@@ -193,5 +195,30 @@ impl Paddle {
         vertices.push(Vector2::new(xpos+bat_width, ypos+bat_height));
         vertices.push(Vector2::new(xpos, ypos+bat_height));
         self.polygon.set_polygon(vertices);
+    }
+
+    // the paddles actually could not move the entire range
+    // based on watching old pong footage, it looks like the maximum range tops
+    // out at the top line of the score counter, or 32V
+    fn move_up(&mut self) {
+        let min_ypos = vclk_to_ypos(32);
+        let new_ypos = self.ypos - PADDLE_MOVE_BY;
+        if new_ypos >= min_ypos {
+            self.ypos = new_ypos
+        } else {
+            self.ypos = min_ypos
+        }
+    }
+
+    // i assume the maximum would also be around 16V from the bottom of the screen
+    fn move_down(&mut self) {
+        let bat_height = vclk_to_interval(15);
+        let max_ypos = VIEWPORT_HEIGHT - vclk_to_interval(16) - bat_height;
+        let new_ypos = self.ypos + PADDLE_MOVE_BY;
+        if new_ypos <= max_ypos {
+            self.ypos = new_ypos
+        } else {
+            self.ypos = max_ypos
+        }
     }
 }
