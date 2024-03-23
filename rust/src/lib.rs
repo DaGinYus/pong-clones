@@ -4,6 +4,7 @@
 // ref: https://www.pong-story.com/LAWN_TENNIS.pdf
 
 use std::convert::TryInto;
+use std::iter;
 use godot::prelude::*;
 use godot::engine::{Polygon2D, IPolygon2D, Area2D, IArea2D};
 
@@ -38,7 +39,7 @@ fn hclk_to_xpos(hclk: i32) -> i32 {
     (hclk_since_hblank as f32 * PX_UNIT_WIDTH) as i32
 }
 
-fn hclk_to_interval(hclk: i32) -> i32 {
+fn hclk_to_px(hclk: i32) -> i32 {
     (hclk as f32 * PX_UNIT_WIDTH) as i32
 }
 
@@ -47,7 +48,7 @@ fn vclk_to_ypos(vclk: i32) -> i32 {
     (vclk_since_vblank as f32 * PX_UNIT_HEIGHT) as i32
 }
 
-fn vclk_to_interval(vclk: i32) -> i32 {
+fn vclk_to_px(vclk: i32) -> i32 {
     (vclk as f32 * PX_UNIT_HEIGHT) as i32
 }
 
@@ -57,6 +58,7 @@ struct Main {
     net: Gd<Net>,
     paddle_l: Gd<Paddle>,
     paddle_r: Gd<Paddle>,
+    scoreboard: Gd<ScoreDisplay>,
     base: Base<Node>
 }
 
@@ -67,6 +69,7 @@ impl INode for Main {
             net: Net::new_alloc(),
             paddle_l: Paddle::from_side(PlayerSide::Left),
             paddle_r: Paddle::from_side(PlayerSide::Right),
+            scoreboard: ScoreDisplay::new_alloc(),
             base
         } 
     }
@@ -75,9 +78,11 @@ impl INode for Main {
         let net_clone = self.net.clone();
         let paddle_l_clone = self.paddle_l.clone();
         let paddle_r_clone = self.paddle_r.clone();
+        let scoreboard_clone = self.scoreboard.clone();
         self.base_mut().add_child(net_clone.clone().upcast());
         self.base_mut().add_child(paddle_l_clone.upcast());
         self.base_mut().add_child(paddle_r_clone.upcast());
+        self.base_mut().add_child(scoreboard_clone.upcast());
     }
 }
 
@@ -96,6 +101,21 @@ impl Into<Rect<f32>> for Rect<i32> {
             y: self.y as f32,
             w: self.w as f32,
             h: self.h as f32,
+        }
+    }
+}
+
+impl<T> Rect<T> {
+    fn new(x: T, y: T, w: T, h: T) -> Self {
+        Self { x, y, w, h }
+    }
+
+    fn from_clk(hclk: i32, vclk: i32, w: i32, h: i32) -> Rect::<i32> {
+        Rect::<i32> {
+            x: hclk_to_xpos(hclk),
+            y: vclk_to_ypos(vclk),
+            w: hclk_to_px(w),
+            h: vclk_to_px(h),
         }
     }
 }
@@ -142,13 +162,13 @@ impl Net {
     // this means the net should be drawn with roughly 2x8 segments 8px apart
     fn draw(&mut self) {
         let net_left_edge = hclk_to_xpos(256);
-        let net_segment_spacing: usize = vclk_to_interval(8).try_into().unwrap();
+        let net_segment_spacing: usize = vclk_to_px(8).try_into().unwrap();
 
-        let net_width = hclk_to_interval(1);
-        let net_height = vclk_to_interval(4);
+        let net_width = hclk_to_px(1);
+        let net_height = vclk_to_px(4);
         for i in (0..VIEWPORT_HEIGHT).step_by(net_segment_spacing) {
             let i_int = i as i32;
-            let rect = Rect { x: net_left_edge, y: i_int, w: net_width, h: net_height };
+            let rect = Rect::new(net_left_edge, i_int, net_width, net_height);
             polygon2d_add_rect(&mut self.base_mut(), rect, false);
         }
         polygon2d_set_indices(&mut self.base_mut());
@@ -225,9 +245,9 @@ impl Paddle {
             PlayerSide::Right => hclk_to_xpos(128+256),
         };
         let ypos = self.ypos;
-        let bat_height = vclk_to_interval(15);
-        let bat_width = hclk_to_interval(4);
-        let rect = Rect { x: xpos, y: ypos, w: bat_width, h: bat_height };
+        let bat_height = vclk_to_px(15);
+        let bat_width = hclk_to_px(4);
+        let rect = Rect::new(xpos, ypos, bat_width, bat_height);
         polygon2d_add_rect(&mut self.polygon, rect, true);
     }
 
@@ -246,8 +266,8 @@ impl Paddle {
 
     // i assume the maximum would also be around 16V from the bottom of the screen
     fn move_down(&mut self) {
-        let bat_height = vclk_to_interval(15);
-        let max_ypos = VIEWPORT_HEIGHT - vclk_to_interval(16) - bat_height;
+        let bat_height = vclk_to_px(15);
+        let max_ypos = VIEWPORT_HEIGHT - vclk_to_px(16) - bat_height;
         let new_ypos = self.ypos + PADDLE_MOVE_BY;
         if new_ypos <= max_ypos {
             self.ypos = new_ypos
@@ -261,6 +281,7 @@ impl Paddle {
 #[class(base=Node2D)]
 struct ScoreDisplay {
     score: [i32; 2],
+    polygon: Gd<Polygon2D>,
     base: Base<Node2D>
 }
 
@@ -269,8 +290,18 @@ impl INode2D for ScoreDisplay {
     fn init(base: Base<Node2D>) -> Self {
         Self {
             score: [0, 0],
+            polygon: Polygon2D::new_alloc(),
             base
         }
+    }
+
+    fn ready(&mut self) {
+        let polygon_clone = self.polygon.clone();
+        self.base_mut().add_child(polygon_clone.upcast());
+    }
+
+    fn process(&mut self, _delta: f64) {
+        self.draw_seven_segment();
     }
 }
 
@@ -300,20 +331,46 @@ impl ScoreDisplay {
     // for two digit scores, the numbers were 4H apart from each other
     // the leftmost edge was at 144H, so the next leftmost would be at 160H
     // for P2 on the right, the leftmost segment was at 336H and the second digit was at 352H
+    // name the horizontal segments 'rows' and the vertical segments 'cols'
     fn draw_seven_segment(&mut self) {
-        let offset_y = vclk_to_ypos(32);
+        self.polygon.set_polygon(PackedVector2Array::new());
+        let offset_vclk = 32;
         for (player, score) in self.score.iter().enumerate() {
             let ones_digit = score % 10;
             let tens_digit = score / 10;
             // trick to calculate offsets using the indices of the scores
-            let tens_offset_x = hclk_to_xpos(144) + (player as i32)*hclk_to_interval(192);
-            let ones_offset_x = tens_offset_x + hclk_to_interval(16);
-
+            let ones_hclk = 175 + (player as i32)*192;
             // make a list of rects, then zip/map with the n_to_seven_segment and draw only if 1
-            let segments = todo!();
-
             if tens_digit != 0 {
+                let tens_seg = ScoreDisplay::n_to_seven_segment(tens_digit).unwrap();
+                let tens_hclk = ones_hclk - 16;
+                let tens_seg_rects = [
+                    Rect::<i32>::from_clk(tens_hclk, offset_vclk, 16, 4),
+                    Rect::<i32>::from_clk(tens_hclk+12, offset_vclk, 4, 16),
+                    Rect::<i32>::from_clk(tens_hclk+12, offset_vclk+16, 4, 16),
+                    Rect::<i32>::from_clk(tens_hclk, offset_vclk+29, 16, 4),
+                    Rect::<i32>::from_clk(tens_hclk, offset_vclk+16, 4, 16),
+                    Rect::<i32>::from_clk(tens_hclk, offset_vclk, 4, 16),
+                    Rect::<i32>::from_clk(tens_hclk, offset_vclk+12, 16, 4),
+                ];
+                for (seg_is_on, seg_rect) in iter::zip(tens_seg, tens_seg_rects) {
+                    if seg_is_on == 1 { polygon2d_add_rect(&mut self.polygon, seg_rect, false) }
+                }
+            }
+            let ones_seg = ScoreDisplay::n_to_seven_segment(ones_digit).unwrap();
+            let ones_seg_rects = [
+                Rect::<i32>::from_clk(ones_hclk, offset_vclk, 16, 4),
+                Rect::<i32>::from_clk(ones_hclk+12, offset_vclk, 4, 16),
+                Rect::<i32>::from_clk(ones_hclk+12, offset_vclk+16, 4, 16),
+                Rect::<i32>::from_clk(ones_hclk, offset_vclk+29, 16, 4),
+                Rect::<i32>::from_clk(ones_hclk, offset_vclk+16, 4, 16),
+                Rect::<i32>::from_clk(ones_hclk, offset_vclk, 4, 16),
+                Rect::<i32>::from_clk(ones_hclk, offset_vclk+12, 16, 4),
+            ];
+            for (seg_is_on, seg_rect) in iter::zip(ones_seg, ones_seg_rects) {
+                if seg_is_on == 1 { polygon2d_add_rect(&mut self.polygon, seg_rect, false) }
             }
         }
+        polygon2d_set_indices(&mut self.polygon);
     }
 }
