@@ -59,6 +59,7 @@ struct Main {
     paddle_l: Gd<Paddle>,
     paddle_r: Gd<Paddle>,
     scoreboard: Gd<ScoreDisplay>,
+    ball: Gd<Ball>,
     base: Base<Node>
 }
 
@@ -70,6 +71,7 @@ impl INode for Main {
             paddle_l: Paddle::from_side(PlayerSide::Left),
             paddle_r: Paddle::from_side(PlayerSide::Right),
             scoreboard: ScoreDisplay::new_alloc(),
+            ball: Ball::new_alloc(),
             base
         } 
     }
@@ -79,10 +81,12 @@ impl INode for Main {
         let paddle_l_clone = self.paddle_l.clone();
         let paddle_r_clone = self.paddle_r.clone();
         let scoreboard_clone = self.scoreboard.clone();
-        self.base_mut().add_child(net_clone.clone().upcast());
+        let ball_clone = self.ball.clone();
+        self.base_mut().add_child(net_clone.upcast());
         self.base_mut().add_child(paddle_l_clone.upcast());
         self.base_mut().add_child(paddle_r_clone.upcast());
         self.base_mut().add_child(scoreboard_clone.upcast());
+        self.base_mut().add_child(ball_clone.upcast());
     }
 }
 
@@ -343,7 +347,7 @@ impl ScoreDisplay {
             // make a list of rects, then zip/map with the n_to_seven_segment and draw only if 1
             if tens_digit != 0 {
                 let tens_seg = ScoreDisplay::n_to_seven_segment(tens_digit).unwrap();
-                let tens_hclk = ones_hclk - 16;
+                let tens_hclk = ones_hclk - 32;
                 let tens_seg_rects = [
                     Rect::<i32>::from_clk(tens_hclk, offset_vclk, 16, 4),
                     Rect::<i32>::from_clk(tens_hclk+12, offset_vclk, 4, 16),
@@ -351,7 +355,7 @@ impl ScoreDisplay {
                     Rect::<i32>::from_clk(tens_hclk, offset_vclk+29, 16, 4),
                     Rect::<i32>::from_clk(tens_hclk, offset_vclk+16, 4, 16),
                     Rect::<i32>::from_clk(tens_hclk, offset_vclk, 4, 16),
-                    Rect::<i32>::from_clk(tens_hclk, offset_vclk+12, 16, 4),
+                    Rect::<i32>::from_clk(tens_hclk, offset_vclk+13, 16, 4),
                 ];
                 for (seg_is_on, seg_rect) in iter::zip(tens_seg, tens_seg_rects) {
                     if seg_is_on == 1 { polygon2d_add_rect(&mut self.polygon, seg_rect, false) }
@@ -365,12 +369,53 @@ impl ScoreDisplay {
                 Rect::<i32>::from_clk(ones_hclk, offset_vclk+29, 16, 4),
                 Rect::<i32>::from_clk(ones_hclk, offset_vclk+16, 4, 16),
                 Rect::<i32>::from_clk(ones_hclk, offset_vclk, 4, 16),
-                Rect::<i32>::from_clk(ones_hclk, offset_vclk+12, 16, 4),
+                Rect::<i32>::from_clk(ones_hclk, offset_vclk+13, 16, 4),
             ];
             for (seg_is_on, seg_rect) in iter::zip(ones_seg, ones_seg_rects) {
                 if seg_is_on == 1 { polygon2d_add_rect(&mut self.polygon, seg_rect, false) }
             }
         }
         polygon2d_set_indices(&mut self.polygon);
+    }
+}
+
+#[derive(GodotClass)]
+#[class(base=Area2D)]
+struct Ball {
+    xpos: i32,
+    ypos: i32,
+    hidden: bool,
+    polygon: Gd<Polygon2D>,
+    base: Base<Area2D>
+}
+
+#[godot_api]
+impl IArea2D for Ball {
+    fn init(base: Base<Area2D>) -> Self {
+        Self {
+            xpos: 0,
+            ypos: 0,
+            hidden: false,
+            polygon: Polygon2D::new_alloc(),
+            base
+        }
+    }
+
+    fn ready(&mut self) {
+        let polygon_clone = self.polygon.clone();
+        self.base_mut().add_child(polygon_clone.upcast());
+    }
+
+    fn process(&mut self, _delta: f64) {
+        self.draw()
+    }
+}
+
+impl Ball {
+    fn draw(&mut self) {
+        if self.hidden != true {
+            let rect = Rect::new(self.xpos, self.ypos, hclk_to_px(4), vclk_to_px(4));
+            polygon2d_add_rect(&mut self.polygon, rect, true);
+        }
     }
 }
