@@ -19,5 +19,7 @@ To run:
 - Run!
 
 Controls:
-W/S & Up/Down for the paddles
-Enter in attract mode to start a new game
+
+`W`/`S` & `Up`/`Down` for the paddles
+
+`Enter` in attract mode to start a new game
