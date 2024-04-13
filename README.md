@@ -1,6 +1,7 @@
 # Pong-Clones
 
-Pong-E in Godot with game logic written in Rust. A project to learn Godot and improve fluency in Rust simultaneously. The reference for this project may be found at https://www.pong-story.com/LAWN_TENNIS.pdf.
+Pong-E as a learning exercise to learn various game engines/frameworks. So far, I have implemented it in Godot and have begun work on porting to ggez.rs
+The reference for this project may be found at https://www.pong-story.com/LAWN_TENNIS.pdf.
 All efforts have been made to render this version as faithful to the original as possible. As such, several features exist in this version that likely do not exist in most pong clones:
 - Proportions based on the exact timings of the sync signals, translated into pixels
 - 7-segment display generation, rather than using rendered fonts
